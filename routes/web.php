@@ -18,6 +18,11 @@ Route::get('/pilihmeja',[UserController::class,'pilihmeja']);
 Route::post('/savesaleorder',[UserController::class, 'savesaleorder']);
 Route::get('/listsaleorder/{id}',[UserController::class,'listsaleorder']);
 
+Route::get('/reservasi',[UserController::class,'reservasi']);
+Route::post('/savereservasi',[UserController::class,'savereservasi']);
+
+route::get('/cekpelanggan',[UserController::class,'cekpelanggan']);
+
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
