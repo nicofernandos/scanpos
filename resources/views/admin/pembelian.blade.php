@@ -31,7 +31,7 @@
                                 <i class="bx bx-edit-alt"></i> Edit
                             </a>
 
-                            <form action="{{ url('/') }}" method="POST" style="display:inline;">
+                            <form action="{{ url('/') }}" me    hod="POST" style="display:inline;">
                             @csrf
                             @method('DELETE')
                             <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Yakin ingin menghapus layanan ini?')">

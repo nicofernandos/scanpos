@@ -13,13 +13,20 @@ Route::get('/', function () {
     return redirect('/saleorder');
 });
 
+
+
 Route::get('/saleorder',[UserController::class, 'saleorder']);
 Route::get('/pilihmeja',[UserController::class,'pilihmeja']);
 Route::post('/savesaleorder',[UserController::class, 'savesaleorder']);
 Route::get('/listsaleorder/{id}',[UserController::class,'listsaleorder']);
 
+
 Route::get('/reservasi',[UserController::class,'reservasi']);
 Route::post('/savereservasi',[UserController::class,'savereservasi']);
+Route::get('/reservasi/{id}',[UserController::class,'showReservasi'])->name('reservasi.show');
+Route::post('/payment/callback', [UserController::class, 'paymentCallback'])->name('payment.callback');
+Route::get('/payment/finish', [UserController::class, 'paymentFinish'])->name('payment.finish');
+
 
 route::get('/cekpelanggan',[UserController::class,'cekpelanggan']);
 

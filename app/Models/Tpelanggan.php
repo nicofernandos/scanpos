@@ -9,7 +9,9 @@ class Tpelanggan extends Model
     
     protected $connection = 'maidatmascgc';
     protected $table = 'tpelanggan';
-    protected $primaryKey = 'id';
+    protected $primaryKey = 'Id';
+    public $incrementing = true;
+    protected $KeyType = 'int';
     public $timestamps = false;
     protected $fillable = [
         'kodlan',
