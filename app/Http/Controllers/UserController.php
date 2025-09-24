@@ -191,6 +191,101 @@ class UserController extends Controller
         return view('user.reservasi',compact('barangs'));
     }
 
+    public function midtransNotification(Request $request)
+    {
+        Log::info('=== MIDTRANS NOTIFICATION RECEIVED ===', [
+            'timestamp' => now(),
+            'ip' => request()->ip(),
+            'method' => request()->method(),
+            'headers' => request()->headers->all(),
+            'body' => $request->all()
+        ]);
+        
+        try {
+            $notification = $request->all();
+            
+            $requiredFields = ['order_id', 'transaction_status', 'status_code', 'gross_amount'];
+            foreach ($requiredFields as $field) {
+                if (!isset($notification[$field])) {
+                    Log::error('Missing required field', ['field' => $field]);
+                    return response()->json(['status' => 'error'], 400);
+                }
+            }
+        
+            $serverKey = config('midtrans.server_key');
+            $hashed = hash('sha512', 
+                $notification['order_id'] . 
+                $notification['status_code'] . 
+                $notification['gross_amount'] . 
+                $serverKey
+            );
+            
+            if ($hashed !== ($notification['signature_key'] ?? '')) {
+                Log::error('Invalid signature from Midtrans', [
+                    'expected' => $hashed,
+                    'received' => $notification['signature_key'] ?? 'missing'
+                ]);
+                return response()->json(['status' => 'error'], 401);
+            }
+            
+            $orderId = $notification['order_id'];
+            $transactionStatus = $notification['transaction_status'];
+            
+            if (strpos($orderId, 'RSV-') === 0) {
+                $reservasiId = str_replace('RSV-', '', $orderId);
+            } else {
+                Log::error('Invalid order_id format', ['order_id' => $orderId]);
+                return response()->json(['status' => 'error'], 400);
+            }
+            
+            Log::info('Processing Midtrans notification', [
+                'order_id' => $orderId,
+                'reservasi_id' => $reservasiId,
+                'transaction_status' => $transactionStatus
+            ]);
+            
+            $reservasi = \App\Models\Treservasi::find($reservasiId);
+            
+            if (!$reservasi) {
+                Log::error('Reservasi not found for notification', [
+                    'reservasi_id' => $reservasiId,
+                    'order_id' => $orderId
+                ]);
+                return response()->json(['status' => 'error'], 404);
+            }
+            
+            $oldStatus = $reservasi->status;
+            
+            $statusObject = (object) ['transaction_status' => $transactionStatus];
+            $this->updateTransactionStatus($reservasi, $statusObject);
+            
+            $newStatus = $reservasi->fresh()->status;
+            
+            Log::info('Status updated via notification', [
+                'reservasi_id' => $reservasiId,
+                'old_status' => $oldStatus,
+                'new_status' => $newStatus,
+                'midtrans_status' => $transactionStatus
+            ]);
+            
+            // Trigger additional logic
+            $this->handleStatusChangeLogic($reservasi, $newStatus);
+            
+            Log::info('=== MIDTRANS NOTIFICATION SUCCESS ===');
+            return response()->json(['status' => 'success']);
+            
+        } catch (\Exception $e) {
+            Log::error('=== MIDTRANS NOTIFICATION ERROR ===', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'request_data' => $request->all()
+            ]);
+            
+            return response()->json(['status' => 'error'], 500);
+        }
+    }
+
     public function savereservasi(Request $request)
     {
         try {
@@ -301,11 +396,28 @@ class UserController extends Controller
                         'quantity' => $item['quantity'],
                         'name'     => $item['name'],
                     ];
-                }, $cartItems)
+                }, $cartItems),
+                // TAMBAHKAN INI untuk konfigurasi callback URLs
+                'callbacks' => [
+                    'finish' => url('/payment/finish'), // Redirect after payment
+                ]
             ];
-            
+
+             if (app()->environment('production') || env('NGROK_URL')) {
+                    $baseUrl = env('NGROK_URL', url(''));
+                    Config::$overrideNotifUrl = $baseUrl . '/midtrans/notification';
+                    Log::info('Setting notification URL', ['url' => Config::$overrideNotifUrl]);
+                }
 
             $snapToken = Snap::getSnapToken($params);
+
+                Log::info('Snap token created', [
+                    'reservasi_id' => $reservasi->id,
+                    'order_id' => 'RSV-' . $reservasi->id,
+                    'notification_url' => Config::$overrideNotifUrl ?? 'default'
+                ]);
+        
+
             return redirect()->route('reservasi.show', $reservasi->id)
                 ->with('snapToken', $snapToken);
 
@@ -328,16 +440,12 @@ class UserController extends Controller
                 return redirect('/reservasi')
                                 ->with('error', 'ID reservasi tidak valid.');
             }
-            
-            
             try {
                 $tableExists = \Schema::hasTable('treservasi');
                 \Log::info('Table treservasi exists: ' . ($tableExists ? 'yes' : 'no'));
             } catch (\Exception $e) {
                 \Log::error('Error checking table existence: ' . $e->getMessage());
-            }
-            
-            
+            }  
             try {
                 $reservasiSimple = FacadesDB::table('treservasi')->where('id', $id)->first();
                 \Log::info('Simple query result: ', $reservasiSimple ? ['found' => true] : ['found' => false]);
@@ -442,20 +550,19 @@ class UserController extends Controller
                 $reservasi = \App\Models\Treservasi::find($reservasiId);
                 
                 if ($reservasi) {
-                    if ($request->transaction_status == 'capture' || $request->transaction_status == 'settlement') {
-                        $reservasi->update(['status' => 'success']);
-                    } elseif ($request->transaction_status == 'pending') {
-                        $reservasi->update(['status' => 'pending']);
-                    } elseif (in_array($request->transaction_status, ['deny', 'expire', 'cancel'])) {
-                        $reservasi->update(['status' => 'failed']);
-                    }
+                    
+                    $statusObject = (object) ['transaction_status' => $request->transaction_status];
+                    $this->updateTransactionStatus($reservasi, $statusObject);
+                    
+                    
+                    $this->handleStatusChangeLogic($reservasi, $reservasi->fresh()->status);
                 }
             }
             
             return response()->json(['status' => 'ok']);
             
         } catch (\Exception $e) {
-            \Log::error('Payment callback error: ' . $e->getMessage());
+            Log::error('Payment callback error: ' . $e->getMessage());
             return response()->json(['status' => 'error'], 500);
         }
     }
@@ -463,8 +570,7 @@ class UserController extends Controller
     public function paymentFinish(Request $request)
     {
         $orderId = $request->get('order_id');
-        $reservasiId = str_replace('RSV-', '', $orderId);
-        
+        $reservasiId = str_replace('RSV-', '', $orderId);  
         try {
             $reservasi = \App\Models\Treservasi::findOrFail($reservasiId);
             
@@ -478,5 +584,265 @@ class UserController extends Controller
 
 
     }
+
+    public function ubahStatusMidtransInternal($orderId, $status)
+    {
+        try {
+            Log::info('Midtrans Internal Status Update', [
+                'order_id' => $orderId,
+                'status' => $status,
+                'timestamp' => now(),
+                'ip' => request()->ip()
+            ]);
+
+            
+            if (strpos($orderId, 'RSV-') === 0) {
+                $reservasiId = str_replace('RSV-', '', $orderId);
+            } else {
+                Log::error('Invalid order_id format', ['order_id' => $orderId]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid order_id format'
+                ], 400);
+            }
+
+            
+            $reservasi = \App\Models\Treservasi::find($reservasiId);
+
+            if (!$reservasi) {
+                Log::error('Reservasi not found', [
+                    'order_id' => $orderId,
+                    'reservasi_id' => $reservasiId
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Reservasi not found'
+                ], 404);
+            }
+
+            
+            $validStatuses = [
+                'pending', 'settlement', 'capture', 'cancel', 
+                'deny', 'expire', 'failure'
+            ];
+
+            if (!in_array($status, $validStatuses)) {
+                Log::error('Invalid status from Midtrans', [
+                    'order_id' => $orderId,
+                    'status' => $status,
+                    'valid_statuses' => $validStatuses
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid status'
+                ], 400);
+            }
+
+            
+            $oldStatus = $reservasi->status;
+
+            
+            $statusObject = (object) ['transaction_status' => $status];
+            $this->updateTransactionStatus($reservasi, $statusObject);
+
+            
+            $newStatus = $reservasi->fresh()->status;
+
+            Log::info('Reservasi status updated successfully', [
+                'order_id' => $orderId,
+                'reservasi_id' => $reservasiId,
+                'old_status' => $oldStatus,
+                'midtrans_status' => $status,
+                'new_status' => $newStatus
+            ]);
+
+            
+            $this->handleStatusChangeLogic($reservasi, $newStatus);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Status updated successfully',
+                'data' => [
+                    'order_id' => $orderId,
+                    'reservasi_id' => $reservasiId,
+                    'old_status' => $oldStatus,
+                    'new_status' => $newStatus,
+                    'midtrans_status' => $status
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error updating reservasi status', [
+                'order_id' => $orderId,
+                'status' => $status,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Internal server error',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    private function convertMidtransStatus($midtransStatus)
+    {
+        switch ($midtransStatus) {
+            case 'settlement':
+            case 'capture':
+                return 'paid'; 
+            
+            case 'pending':
+                return 'pending';
+            
+            case 'expire':
+            case 'cancel':
+                return 'failed';
+            
+            case 'deny':
+            case 'failure':
+                return 'failed';
+            
+            default:
+                return 'pending';
+        }
+    }
+
+    private function handleStatusChangeLogic($reservasi, $newStatus)
+    {
+        try {
+            switch ($newStatus) {
+                case 'paid':
+                    $this->handleSuccessfulPayment($reservasi);
+                    break;
+                
+                case 'failed':
+                    $this->handleFailedPayment($reservasi);
+                    break;
+                
+                case 'pending':
+                    $this->handlePendingPayment($reservasi);
+                    break;
+            }
+        } catch (\Exception $e) {
+            Log::error('Error in status change logic', [
+                'reservasi_id' => $reservasi->id,
+                'status' => $newStatus,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function updateTransactionStatus($transaction, $status)
+    {
+        switch ($status->transaction_status) {
+            case 'settlement':
+                $transaction->update(['status' => 'paid']);
+                break;
+            case 'expire':
+            case 'cancel':
+                $transaction->update(['status' => 'failed']);
+                break;
+            case 'pending':
+                
+                if ($transaction->created_at < now()->subDay()) {
+                    $transaction->update(['status' => 'expired']);
+                } else {
+                    $transaction->update(['status' => 'pending']);
+                }
+                break;
+            case 'deny':
+            case 'failure':
+                $transaction->update(['status' => 'failed']);
+                break;
+        }
+    }
+
+    private function handleSuccessfulPayment($reservasi)
+    {
+        Log::info('Processing successful payment', [
+            'reservasi_id' => $reservasi->id,
+            'pelanggan_id' => $reservasi->pelanggan_id
+        ]);
+
+        try {    
+            $pelanggan = $reservasi->pelanggan;
+            
+            if ($pelanggan && $pelanggan->ema) {
+                
+                
+                Log::info('Email would be sent to: ' . $pelanggan->ema);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Error in successful payment handler', [
+                'reservasi_id' => $reservasi->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    private function handleFailedPayment($reservasi)
+    {
+        Log::info('Processing failed payment', [
+            'reservasi_id' => $reservasi->id,
+            'status' => $reservasi->status
+        ]);
+    }
+    
+    private function handlePendingPayment($reservasi)
+    {
+        Log::info('Processing pending payment', [
+            'reservasi_id' => $reservasi->id
+        ]);
+    }
+
+    public function checkPaymentStatus($reservasiId)
+    {
+        try {
+            $reservasi = \App\Models\Treservasi::findOrFail($reservasiId);
+            
+            Config::$serverKey = config('midtrans.server_key');
+            Config::$isProduction = config('midtrans.is_production', false);
+            
+            $orderId = 'RSV-' . $reservasi->id;
+            
+            $status = \Midtrans\Transaction::status($orderId);
+            
+            Log::info('Manual status check', [
+                'order_id' => $orderId,
+                'current_status' => $reservasi->status,
+                'midtrans_status' => $status->transaction_status
+            ]);
+            
+            $oldStatus = $reservasi->status;
+            $this->updateTransactionStatus($reservasi, $status);
+            $newStatus = $reservasi->fresh()->status;
+            if ($oldStatus !== $newStatus) {
+                $this->handleStatusChangeLogic($reservasi, $newStatus);
+            }
+            return response()->json([
+                'success' => true,
+                'reservasi_status' => $newStatus,
+                'midtrans_status' => $status->transaction_status,
+                'data' => $status
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error checking payment status', [
+                'reservasi_id' => $reservasiId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 
 }

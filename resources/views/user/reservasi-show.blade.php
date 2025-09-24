@@ -28,7 +28,7 @@
             <div class="card mb-4">
                 <div class="card-header d-flex align-items-center justify-content-between bg-info">
                     <h5 class="mb-0 text-white">
-                        Reservasi #{{ $reservasi->id }}
+                        Reservasi RSV-{{ $reservasi->id }}
                     </h5>
                     <small class="text-muted float-end">
                         <span class="badge bg-label-{{ $reservasi->status == 'pending' ? 'warning' : ($reservasi->status == 'success' ? 'success' : 'danger') }}">
@@ -137,7 +137,7 @@
                                             <i class="bx bx-arrow-back me-2"></i> Kembali
                                         </a>
 
-                                        @if($reservasi->status == 'success')
+                                        @if($reservasi->status == 'paid')
                                         <button type="button" class="btn btn-outline-success w-100" onclick="window.print()">
                                             <i class="bx bx-printer me-2"></i> Cetak
                                         </button>

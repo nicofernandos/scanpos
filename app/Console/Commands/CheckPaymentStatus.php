@@ -19,7 +19,7 @@ class CheckPaymentStatus extends Command
 
         $this->info('Starting payment status check...');
         $pendingTransactions = Treservasi::where('status', 'pending')
-            ->where('created_at', '<', now()->subHour())
+            // ->where('created_at', '<', now()->subHour())
             ->get();
 
         $this->info("Found {$pendingTransactions->count()} pending transactions to check");
@@ -31,10 +31,10 @@ class CheckPaymentStatus extends Command
                 $status = MidtransTransaction::status($midtransOrderId);
                 $this->updateTransactionStatus($transaction, $status);
 
-                $this->info("Updated transaction: {$midtransOrderId}");
+                $this->info("Updated transaction: RSV-{$midtransOrderId}");
                 
             } catch (\Exception $e) {
-                $this->error("Error checking transaction {$transaction->id}: " . $e->getMessage());
+                $this->error("Error checking transaction  RSV-{$transaction->id}: " . $e->getMessage());
             }
         }
 
