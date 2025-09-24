@@ -16,10 +16,9 @@ use Illuminate\Support\Facades\Validator;
 use RealRashid\SweetAlert\Facades\Alert;
 use Midtrans\Snap;
 use Midtrans\Config;
-
-
 use Illuminate\Support\Facades\File;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 use function PHPUnit\Framework\isEmpty;
 
@@ -207,7 +206,7 @@ class UserController extends Controller
                 'items'            => 'nullable|string'
             ]);
 
-            \DB::beginTransaction();
+            FacadesDB::beginTransaction();
             $cartItems = [];
             $totalPreOrder = 0;
             if (!empty($request->items)) {
@@ -266,13 +265,13 @@ class UserController extends Controller
                 }
             }
 
-            \DB::commit();
+            FacadesDB::commit();
 
-            Config::$serverKey    = config('midtrans.server_key') ?: env('MIDTRANS_SERVER_KEY');
-            Config::$clientKey    = config('midtrans.client_key') ?: env('MIDTRANS_CLIENT_KEY');
-            Config::$isProduction = config('midtrans.is_production', false);
-            Config::$isSanitized  = config('midtrans.is_sanitized', true);
-            Config::$is3ds        = config('midtrans.is_3ds', true);
+            Config::$serverKey = Config('midtrans.server_key');
+            Config::$clientKey = Config('midtrans.client_key');
+            Config::$isProduction = Config('midtrans.is_production',false);
+            Config::$isSanitized = Config('midtrans.is_sanitized',true);
+            Config::$is3ds = Config('midtrans.is_3ds', true);
             \Log::debug('[MIDTRANS DEBUG] serverKey present? ' . (Config::$serverKey ? 'YES' : 'NO'));
             \Log::debug('[MIDTRANS DEBUG] clientKey present? ' . (Config::$clientKey ? 'YES' : 'NO'));
             \Log::debug('[MIDTRANS DEBUG] config(server_key): ' . (string) config('midtrans.server_key'));
@@ -291,6 +290,9 @@ class UserController extends Controller
                     'first_name' => $request->nama,
                     'email'      => $request->email,
                     'phone'      => $request->nohp,
+                    'billing_address' => [
+                        'address' => $request->alamat,
+                    ]
                 ],
                 'item_details' => array_map(function ($item) {
                     return [
@@ -301,13 +303,14 @@ class UserController extends Controller
                     ];
                 }, $cartItems)
             ];
+            
 
             $snapToken = Snap::getSnapToken($params);
             return redirect()->route('reservasi.show', $reservasi->id)
                 ->with('snapToken', $snapToken);
 
         } catch (\Exception $e) {
-            \DB::rollback();
+            FacadesDB::rollback();
             return redirect()->back()->with('error', $e->getMessage())->withInput();
         }
     }
@@ -336,7 +339,7 @@ class UserController extends Controller
             
             
             try {
-                $reservasiSimple = \DB::table('treservasi')->where('id', $id)->first();
+                $reservasiSimple = FacadesDB::table('treservasi')->where('id', $id)->first();
                 \Log::info('Simple query result: ', $reservasiSimple ? ['found' => true] : ['found' => false]);
             } catch (\Exception $e) {
                 \Log::error('Simple query failed: ' . $e->getMessage());
@@ -429,7 +432,7 @@ class UserController extends Controller
     public function paymentCallback(Request $request)
     {
         try {
-            $serverKey = config('midtrans.serverKey');
+            $serverKey = config('midtrans.server_key');
             $hashed = hash("sha512", $request->order_id.$request->status_code.$request->gross_amount.$serverKey);
             
             if ($hashed == $request->signature_key) {

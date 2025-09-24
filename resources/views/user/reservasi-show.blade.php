@@ -26,8 +26,8 @@
         <!-- Card Utama -->
         <div class="col-12">
             <div class="card mb-4">
-                <div class="card-header d-flex align-items-center justify-content-between">
-                    <h5 class="mb-0">
+                <div class="card-header d-flex align-items-center justify-content-between bg-info">
+                    <h5 class="mb-0 text-white">
                         Reservasi #{{ $reservasi->id }}
                     </h5>
                     <small class="text-muted float-end">
@@ -37,12 +37,12 @@
                     </small>
                 </div>
 
-                <div class="card-body">
+                <div class="card-body mt-4">
                     <div class="row g-4">
                         <div class="col-12 col-lg-7">
                             <div class="card h-100">
                                 <div class="card-body">
-                                    <h6 class="text-muted fw-normal mb-2">
+                                    <h6 class="text-dark fw-normal mb-2">
                                         <i class="bx bx-user me-1"></i>
                                         Informasi Pelanggan
                                     </h6>
@@ -59,7 +59,7 @@
                         <div class="col-12 col-lg-5">
                             <div class="card h-100">
                                 <div class="card-header">
-                                    <h6 class="text-muted fw-normal mb-2">
+                                    <h6 class="text-dark fw-normal mb-2">
                                         <i class="bx bx-calendar-event me-1"></i>
                                         Detail Reservasi
                                     </h6>
@@ -87,16 +87,15 @@
                          <div class="col-12 col-lg-12 col-md-12 col-sm-12">
                             <div class="card h-100">
                                 <div class="card-body">
-                                    <!-- Detail Pesanan -->
                                     @if($reservasi->items && $reservasi->items->count() > 0)
-                                    <h6 class="text-muted fw-normal mb-3">
+                                    <h6 class="text-dark fw-bold mb-3">
                                         <i class="bx bx-list-ul me-1"></i>
                                         Detail Pesanan
                                     </h6>
-                                    <div class="table-responsive mb-3">
-                                        <table class="table table-sm table-striped">
+                                    <div class="table-responsive text-nowrap mb-3">
+                                        <table class="table table-sm ">
                                             <thead>
-                                                <tr>
+                                                <tr class="text-nowrap">
                                                     <th>Item</th>
                                                     <th class="text-center">Qty</th>
                                                     <th class="text-end">Subtotal</th>
@@ -158,7 +157,7 @@
 
 @section('script')
 <script src="https://app.sandbox.midtrans.com/snap/snap.js" 
-        data-client-key="{{ config('midtrans.clientKey') }}"></script>
+        data-client-key="{{ config('midtrans.client_key') }}"></script>
 
 @if($snapToken)
 <script>

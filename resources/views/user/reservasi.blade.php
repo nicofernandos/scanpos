@@ -202,7 +202,7 @@
           </div>
 
           <!-- Category Tabs -->
-          <div class="mb-3">
+          <div class="mb-4">
             <ul class="nav nav-pills" id="category-tabs">
               <li class="nav-item">
                 <button class="nav-link active" data-category="all">Semua</button>
@@ -211,7 +211,7 @@
             </ul>
           </div>
 
-          <div class="row g-3 mb-3" id="product-grid" style="max-height: 500px; overflow-y: auto;">
+          <div class="row g-3 mb-3 mt-3" id="product-grid" style="max-height: 500px; overflow-y: auto;">
             @foreach($barangs as $barang)
               <div class="col-6 col-md-4 col-lg-3">
                 <div class="card product-card h-100"
