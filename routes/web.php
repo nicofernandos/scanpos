@@ -26,7 +26,6 @@ Route::post('/savereservasi',[UserController::class,'savereservasi']);
 Route::get('/reservasi/{id}',[UserController::class,'showReservasi'])->name('reservasi.show');
 Route::post('/payment/callback', [UserController::class, 'paymentCallback'])->name('payment.callback');
 Route::get('/payment/finish', [UserController::class, 'paymentFinish'])->name('payment.finish');
-
 Route::get('/ubahstatusmidtransinternal/{id}/{status}', [
     UserController::class, 
     'ubahStatusMidtransInternal'
@@ -37,8 +36,7 @@ Route::get('/check-payment-status/{id}', [
     'checkPaymentStatus'
 ])->name('payment.check');
 
-Route::post('/midtrans/notification', [UserController::class, 'midtransNotification'])
-    ->name('midtrans.notification');
+Route::get('cetakreservasi/{id}',[UserController::class, 'cetakreservasi']);
 
 route::get('/cekpelanggan',[UserController::class,'cekpelanggan']);
 

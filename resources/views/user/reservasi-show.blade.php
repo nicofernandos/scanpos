@@ -68,6 +68,9 @@
                                         <p class="mb-1"><strong>Tanggal:</strong> {{ date('d/m/Y', strtotime($reservasi->tanggalreservasi)) }}</p>
                                         <p class="mb-1"><strong>Waktu:</strong> {{ $reservasi->waktureservasi }}</p>
                                         <p class="mb-0"><strong>Dibuat:</strong> {{ $reservasi->created_at ? \Carbon\Carbon::parse($reservasi->created_at)->format('d/m/Y H:i') : '-' }}</p>
+                                        @if($reservasi->status == 'paid')
+                                        <p class="mb-0 text-muted"><strong>Pembayaran Jam:</strong> {{ $reservasi->updated_at ? \Carbon\Carbon::parse($reservasi->updated_at)->format('d/m/Y H:i') : '-' }}</p>
+                                        @endif    
                                     </div>
                                     </div>
                                 </div>
@@ -78,8 +81,7 @@
                         </div>
 
                         <div class="col-lg-12 colp-md-12 col-sm-12">
-                            <div class="card h-100">
-
+                            <div class="card h-100">        
                             </div>
                         </div>
                     </div>
@@ -114,7 +116,6 @@
                                     </div>
                                     @endif
 
-                                    <!-- Total -->
                                     <div class="d-flex justify-content-between align-items-center p-3 bg-light rounded mb-3">
                                         <h6 class="mb-0">
                                             <i class="bx bx-money me-2"></i>
@@ -125,7 +126,6 @@
                                         </h5>
                                     </div>
 
-                                    <!-- Tombol Aksi -->
                                     <div class="d-flex gap-2">
                                         @if($reservasi->status == 'pending' && $snapToken)
                                         <button type="button" class="btn btn-primary w-100" id="pay-button">
@@ -138,9 +138,9 @@
                                         </a>
 
                                         @if($reservasi->status == 'paid')
-                                        <button type="button" class="btn btn-outline-success w-100" onclick="window.print()">
+                                        <a href="{{ url('cetakreservasi', $reservasi->id) }}" class="btn btn-outline-success w-100" ">
                                             <i class="bx bx-printer me-2"></i> Cetak
-                                        </button>
+                                        </a>
                                         @endif
                                     </div>
                                 </div>
@@ -169,8 +169,6 @@
                 snap.pay("{{ $snapToken }}", {
                     onSuccess: function(result) {
                         console.log("Payment success", result);
-                        
-                        // Show success notification
                         Swal.fire({
                             icon: 'success',
                             title: 'Pembayaran Berhasil!',
@@ -178,7 +176,6 @@
                             confirmButtonText: 'OK'
                         }).then((result) => {
                             if (result.isConfirmed) {
-                                // Redirect atau refresh halaman
                                 window.location.reload();
                             }
                         });
@@ -206,7 +203,6 @@
                     onClose: function() {
                         console.log('Payment popup closed');
                         
-                        // Optional: show notification when user closes popup
                         const Toast = Swal.mixin({
                             toast: true,
                             position: 'top-end',

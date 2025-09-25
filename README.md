@@ -74,4 +74,5 @@ MIDTRANS_CLIENT_KEY=your_client_key
 4. Pelanggan memilih **produk** yang ingin dipesan.  
 5. Sistem menampilkan **ringkasan pesanan + total nominal**.  
 6. Pelanggan melakukan **konfirmasi & pembayaran melalui Midtrans**.  
-7. Data reservasi tersimpan, dan pelanggan akan mendapatkan **konfirmasi reservasi berhasil**.  
+7. Jika pelanggan sudah melakukan pembayaran akan merubah status pembayaran jika paid dan akan dapat mencetak struk atau print;
+8. Data reservasi tersimpan, dan pelanggan akan mendapatkan **konfirmasi reservasi berhasil**.  

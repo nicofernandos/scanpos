@@ -200,6 +200,8 @@ class UserController extends Controller
             'headers' => request()->headers->all(),
             'body' => $request->all()
         ]);
+
+        Log::info($request->all());
         
         try {
             $notification = $request->all();
@@ -286,6 +288,7 @@ class UserController extends Controller
         }
     }
 
+
     public function savereservasi(Request $request)
     {
         try {
@@ -360,6 +363,8 @@ class UserController extends Controller
                 }
             }
 
+            Log::info($request->all());
+
             FacadesDB::commit();
 
             Config::$serverKey = Config('midtrans.server_key');
@@ -405,7 +410,7 @@ class UserController extends Controller
 
              if (app()->environment('production') || env('NGROK_URL')) {
                     $baseUrl = env('NGROK_URL', url(''));
-                    Config::$overrideNotifUrl = $baseUrl . '/midtrans/notification';
+                    Config::$overrideNotifUrl = $baseUrl . 'api/midtrans/notification';
                     Log::info('Setting notification URL', ['url' => Config::$overrideNotifUrl]);
                 }
 
@@ -843,6 +848,488 @@ class UserController extends Controller
             ], 500);
         }
     }
+
+    public function cetakreservasi($id)
+    {
+        try {
+            Log::info('Permintaan Cetak Reservasi', ['id' => $id]);
+            
+            if (!is_numeric($id) || $id <= 0) {
+                Log::error('Tidak dapat cetak reservasi for cetak', ['id' => $id]);
+                Alert::error('error', 'ID Reservasi tidak dapat ditemukan');
+                return redirect('reservasi');
+            }
+            $reservasi = \App\Models\Treservasi::with([
+                'pelanggan',
+                'items' => function($query) {
+                    $query->orderBy('id', 'asc');
+                }
+            ])->find($id);
+
+            if (!$reservasi) {
+                Log::error('Reservasi not found for cetak', ['id' => $id]);
+                Alert::error('error', 'Data reservasi tidak ditemukan');
+                return redirect('reservasi');
+            }
+            $allowedStatuses = ['paid', 'confirmed', 'completed'];
+            if (!in_array($reservasi->status, $allowedStatuses)) {
+                Log::warning('Mencoba print reservasi tanpa id yang valid', [
+                    'id' => $id,
+                    'status' => $reservasi->status,
+                    'allowed_statuses' => $allowedStatuses
+                ]);
+                return redirect()->back()->with('error', 'Reservasi belum bisa dicetak. Status: ' . ucfirst($reservasi->status));
+            }
+
+            $totalItems = $reservasi->items ? $reservasi->items->count() : 0;
+            $totalQuantity = $reservasi->items ? $reservasi->items->sum('qty') : 0;
+            $totalAmount = $reservasi->items ? $reservasi->items->sum('subtotal') : 0;
+
+            $reservasiData = [
+                'id' => $reservasi->id,
+                'kode_reservasi' => 'RSV-' . str_pad($reservasi->id, 6, '0', STR_PAD_LEFT),
+                'tanggal_reservasi' => \Carbon\Carbon::parse($reservasi->tanggalreservasi)->format('d/m/Y'),
+                'waktu_reservasi' => $reservasi->waktureservasi,
+                'tanggal_dibuat' => \Carbon\Carbon::parse($reservasi->created_at)->format('d/m/Y H:i:s'),
+                'status' => ucfirst($reservasi->status),
+                'status_label' => $this->getStatusLabel($reservasi->status),
+                'total_preorder' => $reservasi->total_preorder ?? $totalAmount,
+            ];
+            $pelangganData = [
+                'kode_pelanggan' => $reservasi->pelanggan->kodlan ?? '-',
+                'nama' => $reservasi->pelanggan->nam ?? 'Tidak tersedia',
+                'tempat_lahir' => $reservasi->pelanggan->temlah ?? '-',
+                'tanggal_lahir' => $reservasi->pelanggan->tgllah ? 
+                    \Carbon\Carbon::parse($reservasi->pelanggan->tgllah)->format('d/m/Y') : '-',
+                'alamat' => $reservasi->pelanggan->ala ?? '-',
+                'email' => $reservasi->pelanggan->ema ?? '-',
+                'nomor_hp' => $reservasi->pelanggan->nowa ?? '-',
+            ];
+            $itemsData = [];
+            if ($reservasi->items && $reservasi->items->count() > 0) {
+                foreach ($reservasi->items as $index => $item) {
+                    $itemsData[] = [
+                        'no' => $index + 1,
+                        'nama_barang' => $item->nama_barang ?? 'Item tidak dikenal',
+                        'satuan' => $item->satuan ?? 'pcs',
+                        'harga_satuan' => $item->harga_satuan ?? 0,
+                        'harga_satuan_formatted' => 'Rp ' . number_format($item->harga_satuan ?? 0, 0, ',', '.'),
+                        'qty' => $item->qty ?? 0,
+                        'subtotal' => $item->subtotal ?? 0,
+                        'subtotal_formatted' => 'Rp ' . number_format($item->subtotal ?? 0, 0, ',', '.'),
+                    ];
+                }
+            }
+            $statistik = [
+                'total_items' => $totalItems,
+                'total_quantity' => $totalQuantity,
+                'total_amount' => $totalAmount,
+                'total_amount_formatted' => 'Rp ' . number_format($totalAmount, 0, ',', '.'),
+            ];
+
+            $infoPerusahaan = [
+                'nama' => config('app.company_name', 'Nama Perusahaan'),
+                'alamat' => config('app.company_address', 'Alamat Perusahaan'),
+                'telepon' => config('app.company_phone', 'Telepon Perusahaan'),
+                'email' => config('app.company_email', 'Email Perusahaan'),
+                'website' => config('app.url'),
+            ];
+
+            Log::info('Cetak reservasi databerhasil di dapatkan', [
+                'reservasi_id' => $id,
+                'pelanggan_name' => $pelangganData['nama'],
+                'total_items' => $totalItems,
+                'total_amount' => $totalAmount,
+                'status' => $reservasi->status
+            ]);
+
+            return view('user.cetakreservasi', compact(
+                'reservasi',
+                'reservasiData',
+                'pelangganData', 
+                'itemsData',
+                'statistik',
+                'infoPerusahaan'
+            ));
+
+        } catch (\Exception $e) {
+            Log::error('Error in cetakReservasi', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return redirect()->back()->with('error', 'Terjadi kesalahan saat memuat data cetak: ' . $e->getMessage());
+        }
+    }
+
+    private function getStatusLabel($status)
+    {
+        $statusLabels = [
+            'pending' => ['label' => 'Menunggu Pembayaran', 'class' => 'warning', 'color' => '#ffc107'],
+            'paid' => ['label' => 'Sudah Dibayar', 'class' => 'success', 'color' => '#28a745'],
+            'confirmed' => ['label' => 'Dikonfirmasi', 'class' => 'info', 'color' => '#17a2b8'],
+            'completed' => ['label' => 'Selesai', 'class' => 'primary', 'color' => '#007bff'],
+            'cancelled' => ['label' => 'Dibatalkan', 'class' => 'danger', 'color' => '#dc3545'],
+            'expired' => ['label' => 'Kadaluarsa', 'class' => 'secondary', 'color' => '#6c757d'],
+            'failed' => ['label' => 'Gagal', 'class' => 'danger', 'color' => '#dc3545'],
+        ];
+
+        return $statusLabels[$status] ?? ['label' => ucfirst($status), 'class' => 'secondary', 'color' => '#6c757d'];
+    }
+
+    public function cetakReservasiPDF($id)
+    {
+        try {
+            $data = $this->getReservasiDataForPrint($id);
+            
+            if (!$data) {
+                return redirect()->back()->with('error', 'Data reservasi tidak ditemukan atau tidak dapat dicetak.');
+            }
+
+            $pdf = app()->make('dompdf.wrapper');
+            $pdf->loadView('user.cetakreservasi-pdf', $data);
+            $pdf->setPaper('A4', 'portrait');
+
+            $fileName = 'Reservasi_' . $data['reservasiData']['kode_reservasi'] . '_' . date('Ymd_His') . '.pdf';
+
+            Log::info('PDF cetak reservasi generated', [
+                'reservasi_id' => $id,
+                'file_name' => $fileName
+            ]);
+
+            return $pdf->download($fileName);
+
+        } catch (\Exception $e) {
+            Log::error('Error generating PDF cetak reservasi', [
+                'id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return redirect()->back()->with('error', 'Gagal membuat PDF: ' . $e->getMessage());
+        }
+    }
+
+
+    // Api Json
+
+    public function getcetakreservasi($id)
+    {
+        try {
+            Log::info('Permintaan Cetak Reservasi API', ['id' => $id]);
+
+            if (!is_numeric($id) || $id <= 0) {
+                Log::error('ID Reservasi tidak valid', ['id' => $id]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ID Reservasi tidak valid'
+                ], 400);
+            }
+
+            $reservasi = \App\Models\Treservasi::with([
+                'pelanggan',
+                'items' => function($query) {
+                    $query->orderBy('id', 'asc');
+                }
+            ])->find($id);
+
+            if (!$reservasi) {
+                Log::error('Reservasi tidak ditemukan', ['id' => $id]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data reservasi tidak ditemukan'
+                ], 404);
+            }
+
+            $allowedStatuses = ['paid', 'confirmed', 'completed'];
+            if (!in_array($reservasi->status, $allowedStatuses)) {
+                Log::warning('Reservasi belum bisa dicetak', [
+                    'id' => $id,
+                    'status' => $reservasi->status,
+                    'allowed_statuses' => $allowedStatuses
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Reservasi belum bisa dicetak. Status: ' . ucfirst($reservasi->status)
+                ], 422);
+            }
+
+            $totalItems = $reservasi->items ? $reservasi->items->count() : 0;
+            $totalQuantity = $reservasi->items ? $reservasi->items->sum('qty') : 0;
+            $totalAmount = $reservasi->items ? $reservasi->items->sum('subtotal') : 0;
+
+            $reservasiData = [
+                'id' => $reservasi->id,
+                'kode_reservasi' => 'RSV-' . str_pad($reservasi->id, 6, '0', STR_PAD_LEFT),
+                'tanggal_reservasi' => \Carbon\Carbon::parse($reservasi->tanggalreservasi)->format('d/m/Y'),
+                'waktu_reservasi' => $reservasi->waktureservasi,
+                'tanggal_dibuat' => \Carbon\Carbon::parse($reservasi->created_at)->format('d/m/Y H:i:s'),
+                'status' => ucfirst($reservasi->status),
+                'status_label' => $this->getStatusLabel($reservasi->status),
+                'total_preorder' => $reservasi->total_preorder ?? $totalAmount,
+            ];
+
+            $pelangganData = [
+                'kode_pelanggan' => $reservasi->pelanggan->kodlan ?? '-',
+                'nama' => $reservasi->pelanggan->nam ?? 'Tidak tersedia',
+                'tempat_lahir' => $reservasi->pelanggan->temlah ?? '-',
+                'tanggal_lahir' => $reservasi->pelanggan->tgllah ? 
+                    \Carbon\Carbon::parse($reservasi->pelanggan->tgllah)->format('d/m/Y') : '-',
+                'alamat' => $reservasi->pelanggan->ala ?? '-',
+                'email' => $reservasi->pelanggan->ema ?? '-',
+                'nomor_hp' => $reservasi->pelanggan->nowa ?? '-',
+            ];
+
+            $itemsData = [];
+            if ($reservasi->items && $reservasi->items->count() > 0) {
+                foreach ($reservasi->items as $index => $item) {
+                    $itemsData[] = [
+                        'no' => $index + 1,
+                        'nama_barang' => $item->nama_barang ?? 'Item tidak dikenal',
+                        'satuan' => $item->satuan ?? 'pcs',
+                        'harga_satuan' => $item->harga_satuan ?? 0,
+                        'harga_satuan_formatted' => 'Rp ' . number_format($item->harga_satuan ?? 0, 0, ',', '.'),
+                        'qty' => $item->qty ?? 0,
+                        'subtotal' => $item->subtotal ?? 0,
+                        'subtotal_formatted' => 'Rp ' . number_format($item->subtotal ?? 0, 0, ',', '.'),
+                    ];
+                }
+            }
+
+            $statistik = [
+                'total_items' => $totalItems,
+                'total_quantity' => $totalQuantity,
+                'total_amount' => $totalAmount,
+                'total_amount_formatted' => 'Rp ' . number_format($totalAmount, 0, ',', '.'),
+            ];
+
+            $infoPerusahaan = [
+                'nama' => config('app.company_name', 'Nama Perusahaan'),
+                'alamat' => config('app.company_address', 'Alamat Perusahaan'),
+                'telepon' => config('app.company_phone', 'Telepon Perusahaan'),
+                'email' => config('app.company_email', 'Email Perusahaan'),
+                'website' => config('app.url'),
+            ];
+
+            Log::info('Data reservasi berhasil diambil', [
+                'reservasi_id' => $id,
+                'pelanggan_name' => $pelangganData['nama'],
+                'total_items' => $totalItems,
+                'total_amount' => $totalAmount,
+                'status' => $reservasi->status
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Data reservasi berhasil diambil',
+                'data' => [
+                    'reservasi' => $reservasiData,
+                    'pelanggan' => $pelangganData,
+                    'items' => $itemsData,
+                    'statistik' => $statistik,
+                    'info_perusahaan' => $infoPerusahaan,
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('Error in cetakReservasi API', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat memuat data cetak: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getsaleorder(Request $request)
+    {
+        try {
+            $idmeja = $request->query('meja');
+
+            if (!$idmeja) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Silahkan pilih meja terlebih dahulu!'
+                ], 400);
+            }
+
+            $meja = Tmeja::find($idmeja);
+            if (!$meja) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Meja tidak ditemukan!'
+                ], 404);
+            }
+
+            $barangs = FacadesDB::connection('maisecgc')
+                ->table('tbarang')
+                ->join('thargajual', 'tbarang.id', '=', 'thargajual.idbar')
+                ->leftJoin('tbarangfoto', 'tbarang.id', '=', 'tbarangfoto.idbar')
+                ->select(
+                    'tbarang.id',
+                    'tbarang.kobar',
+                    'tbarang.nam as nama_barang',
+                    'thargajual.har as harga_jual',
+                    'tbarangfoto.img as foto'
+                )
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Data sale order berhasil diambil',
+                'data' => [
+                    'meja' => [
+                        'id' => $meja->id,
+                        'kode' => $meja->kode ?? null,
+                        'nama' => $meja->nama ?? null,
+                    ],
+                    'barangs' => $barangs
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getlistsaleorder($id)
+    {
+        try {
+            $saleorder = Tsaleorder::with(['salesorderdetails', 'meja'])->find($id);
+
+            if (!$saleorder) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sale order tidak ditemukan'
+                ], 404);
+            }
+            $saleorderData = [
+                'id' => $saleorder->id,
+                'kode_saleorder' => $saleorder->kode ?? null,
+                'tanggal' => $saleorder->created_at 
+                    ? \Carbon\Carbon::parse($saleorder->created_at)->format('d/m/Y H:i:s') 
+                    : null,
+                'status' => $saleorder->status ?? '-',
+                'meja' => $saleorder->meja ? [
+                    'id' => $saleorder->meja->id,
+                    'kode' => $saleorder->meja->kod ?? null,
+                    'nama' => $saleorder->meja->nam ?? null,
+                ] : null,
+                'details' => $saleorder->salesorderdetails->map(function($detail, $index) {
+                    return [
+                        'no' => $index + 1,
+                        'id' => $detail->id,
+                        'barang' => $detail->nam ?? null,
+                        'qty' => $detail->qty ?? 0,
+                        'harga' => $detail->harga ?? 0,
+                        'subtotal' => $detail->subtotal ?? 0,
+                        'subtotal_formatted' => 'Rp ' . number_format($detail->subtotal ?? 0, 0, ',', '.'),
+                    ];
+                })
+            ];
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Data sale order berhasil diambil',
+                'data' => $saleorderData
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    public function getshowreservasi($id)
+    {
+        try {
+            if (!is_numeric($id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ID reservasi tidak valid.'
+                ], 400);
+            }
+
+            // Pastikan model tersedia
+            if (!class_exists(\App\Models\Treservasi::class)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Model Treservasi tidak ditemukan.'
+                ], 500);
+            }
+
+            $reservasi = \App\Models\Treservasi::with([
+                'pelanggan',
+                'items'
+            ])->find($id);
+
+            if (!$reservasi) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Reservasi tidak ditemukan.'
+                ], 404);
+            }
+
+            $snapToken = session('snapToken');
+            $data = [
+                'id' => $reservasi->id,
+                'tanggal' => $reservasi->created_at 
+                    ? \Carbon\Carbon::parse($reservasi->created_at)->format('d/m/Y H:i:s') 
+                    : null,
+                'status' => $reservasi->status ?? '-',
+                'snap_token' => $snapToken ?? null,
+                'pelanggan' => $reservasi->pelanggan ? [
+                    'id' => $reservasi->pelanggan->id,
+                    'nama' => $reservasi->pelanggan->nam ?? null,
+                    'telp' => $reservasi->pelanggan->telp ?? null,
+                ] : null,
+                'items' => $reservasi->items->map(function($item, $index) {
+                    return [
+                        'no' => $index + 1,
+                        'id' => $item->id,
+                        'barang' => $item->barang->nam ?? null,
+                        'qty' => $item->qty ?? 0,
+                        'harga' => $item->harga ?? 0,
+                        'subtotal' => $item->subtotal ?? 0,
+                        'subtotal_formatted' => 'Rp ' . number_format($item->subtotal ?? 0, 0, ',', '.'),
+                    ];
+                })
+            ];
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Data reservasi berhasil diambil',
+                'data' => $data
+            ], 200);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reservasi tidak ditemukan.'
+            ], 404);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+
 
 
 }
